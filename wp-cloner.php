@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Cloner
  * Description: Strumento di clonazione per WordPress: esporta e importa file e database.
- * Version: 0.2
+ * Version: 0.2.1
  * Author: 303Lab
  *
  * Questo plugin offre una procedura asincrona per l'esportazione del sito, con barra di progresso e opzioni di compressione.
@@ -114,9 +114,16 @@ function wpcloner_run_export($job_id_arg)
     set_transient($job_id . '_progress', 30, HOUR_IN_SECONDS);
     $include_paths = [WP_CONTENT_DIR, $dump];
     set_transient($job_id . '_progress', 50, HOUR_IN_SECONDS);
-    $uploads  = wp_upload_dir();
-    $dest     = trailingslashit($uploads['basedir']) . 'wpcloner-' . date('Ymd-His') . '.zip';
-    $ok       = $packager->zip($dest, $include_paths, $manifest);
+    // Determina la directory di destinazione per il pacchetto.
+    $uploads = wp_upload_dir();
+    // Usa una sottodirectory dedicata per i pacchetti in modo da poterli individuare facilmente.
+    $dest_dir = trailingslashit($uploads['basedir']) . 'wpcloner';
+    // Assicurati che la directory esista.
+    if (!file_exists($dest_dir)) {
+        wp_mkdir_p($dest_dir);
+    }
+    $dest = trailingslashit($dest_dir) . 'wpcloner-' . date('Ymd-His') . '.zip';
+    $ok   = $packager->zip($dest, $include_paths, $manifest);
     if (file_exists($dump)) {
         @unlink($dump);
     }
@@ -166,7 +173,51 @@ function wpcloner_ajax_download()
         wp_die('Denied');
     }
     $job_id = isset($_GET['job_id']) ? sanitize_text_field($_GET['job_id']) : '';
-    $file   = $job_id ? get_transient($job_id . '_file') : '';
+    $file = $job_id ? get_transient($job_id . '_file') : '';
+    // Se non troviamo il percorso salvato o il file non esiste più, prova a localizzarlo
+    if (!$file || !file_exists($file)) {
+        // Analizza l'ID per estrarre una possibile data/ora (ultima parte dopo l'underscore).
+        $timestamp = 0;
+        if (strpos($job_id, '_') !== false) {
+            $parts = explode('_', $job_id);
+            $last  = end($parts);
+            if (is_numeric($last)) {
+                $timestamp = (int) $last;
+            }
+        }
+        // Cerca nella directory uploads/wpcloner per pacchetti generati nelle ultime 2 ore.
+        $uploads   = wp_upload_dir();
+        $packages_dir = trailingslashit($uploads['basedir']) . 'wpcloner';
+        if (file_exists($packages_dir)) {
+            $candidates = glob(trailingslashit($packages_dir) . 'wpcloner-*.zip*');
+            if (!empty($candidates)) {
+                // Ordina per data di modifica decrescente.
+                usort($candidates, function($a, $b) {
+                    return filemtime($b) - filemtime($a);
+                });
+                foreach ($candidates as $candidate) {
+                    // Se non abbiamo timestamp specifico, prendi il più recente entro 2 ore.
+                    if ($timestamp === 0) {
+                        if (filemtime($candidate) >= time() - 2 * HOUR_IN_SECONDS) {
+                            $file = $candidate;
+                            break;
+                        }
+                    } else {
+                        // Confronta la data nel nome con l'ID del job.
+                        if (preg_match('/wpcloner-(\d{8}-\d{6})/', basename($candidate), $m)) {
+                            $file_time = strtotime(str_replace('-', '', substr($m[1], 0, 8)) . substr($m[1], 9));
+                            // Se la differenza è entro 3600 secondi, considera valido.
+                            if (abs($file_time - $timestamp) <= 3600) {
+                                $file = $candidate;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Verifica nuovamente l'esistenza del file.
     if (!$file || !file_exists($file)) {
         wp_die('Pacchetto non trovato');
     }
@@ -176,6 +227,7 @@ function wpcloner_ajax_download()
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     header('Content-Length: ' . filesize($file));
     readfile($file);
+    // Rimuovi il pacchetto e la transient per non lasciare file orfani.
     @unlink($file);
     delete_transient($job_id . '_file');
     exit;
