@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Cloner
  * Description: Strumento di clonazione per WordPress: esporta e importa file e database.
- * Version: 0.2.1
+ * Version: 0.2.2
  * Author: 303Lab
  *
  * Questo plugin offre una procedura asincrona per l'esportazione del sito, con barra di progresso e opzioni di compressione.
@@ -46,6 +46,8 @@ function wpcloner_admin_page()
 // Hook per esportazione asincrona e importazione.
 add_action('admin_post_wpcloner_export', 'wpcloner_enqueue_export');
 add_action('admin_post_wpcloner_import', 'wpcloner_handle_import');
+// Hook per l'import di pacchetti già presenti nel server.
+add_action('admin_post_wpcloner_import_existing', 'wpcloner_handle_import_existing');
 
 // Hook per esecuzione del job di esportazione.
 add_action('wpcloner_run_export', 'wpcloner_run_export', 10, 1);
@@ -249,6 +251,35 @@ function wpcloner_handle_import()
     $tmp  = $file['tmp_name'];
     $importer = new WPCloner_Importer();
     $ok = $importer->import_package($tmp, [
+        'new_url'      => isset($_POST['new_url']) ? esc_url_raw($_POST['new_url']) : '',
+        'strip_emails' => !empty($_POST['strip_emails']),
+        'disable_mail' => !empty($_POST['disable_mail']),
+    ]);
+    if (!$ok) {
+        wp_safe_redirect(add_query_arg('wpcloner_status', 'error', admin_url('tools.php?page=wpcloner')));
+        exit;
+    }
+    wp_safe_redirect(add_query_arg('wpcloner_status', 'success', admin_url('tools.php?page=wpcloner')));
+    exit;
+}
+
+/**
+ * Gestisce l'import di un pacchetto già salvato sul server (senza upload).
+ *
+ * Consente di importare pacchetti presenti nella directory wp-content/uploads/wpcloner.
+ */
+function wpcloner_handle_import_existing()
+{
+    if (!current_user_can('manage_options')) {
+        wp_die('Denied');
+    }
+    check_admin_referer('wpcloner_import_existing');
+    $file_path = isset($_POST['file_path']) ? sanitize_text_field($_POST['file_path']) : '';
+    if (!$file_path || !file_exists($file_path)) {
+        wp_die('Pacchetto mancante');
+    }
+    $importer = new WPCloner_Importer();
+    $ok = $importer->import_package($file_path, [
         'new_url'      => isset($_POST['new_url']) ? esc_url_raw($_POST['new_url']) : '',
         'strip_emails' => !empty($_POST['strip_emails']),
         'disable_mail' => !empty($_POST['disable_mail']),

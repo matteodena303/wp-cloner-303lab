@@ -90,4 +90,53 @@
         </table>
         <?php submit_button('Importa pacchetto'); ?>
     </form>
+
+    <hr />
+
+    <h2>Importa pacchetto salvato</h2>
+    <p>Se hai già generato un pacchetto con WP Cloner (nella cartella uploads/wpcloner) o lo hai caricato via FTP, puoi importarlo direttamente senza caricarlo dal tuo browser.</p>
+    <?php
+    $uploads_dir  = wp_get_upload_dir();
+    $packages_dir = trailingslashit($uploads_dir['basedir']) . 'wpcloner';
+    $packages     = [];
+    if (file_exists($packages_dir)) {
+        $packages = glob(trailingslashit($packages_dir) . 'wpcloner-*.zip*');
+    }
+    if (!empty($packages)) {
+        ?>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+            <?php wp_nonce_field('wpcloner_import_existing'); ?>
+            <input type="hidden" name="action" value="wpcloner_import_existing">
+            <table class="form-table" role="presentation">
+                <tr>
+                    <th scope="row"><label for="existing_package">Pacchetto salvato</label></th>
+                    <td>
+                        <select name="file_path" id="existing_package">
+                            <?php
+                            foreach ($packages as $pkg) {
+                                echo '<option value="' . esc_attr($pkg) . '">' . esc_html(basename($pkg)) . ' (' . size_format(filesize($pkg)) . ')</option>';
+                            }
+                            ?>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="new_url_existing">Nuovo URL</label></th>
+                    <td><input type="url" name="new_url" id="new_url_existing" class="regular-text" placeholder="https://nuovosito.test"></td>
+                </tr>
+                <tr>
+                    <th scope="row">Opzioni</th>
+                    <td>
+                        <label><input type="checkbox" name="strip_emails" value="1"> Anonimizza email utenti (staging)</label><br>
+                        <label><input type="checkbox" name="disable_mail" value="1"> Disabilita invio email (staging)</label>
+                    </td>
+                </tr>
+            </table>
+            <?php submit_button('Importa pacchetto salvato'); ?>
+        </form>
+        <?php
+    } else {
+        echo '<p>Nessun pacchetto salvato trovato nella cartella uploads/wpcloner.</p>';
+    }
+    ?>
 </div>
